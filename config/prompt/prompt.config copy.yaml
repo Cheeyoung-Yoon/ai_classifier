@@ -1,0 +1,443 @@
+version: "2025-09-04"
+defaults:
+  model: gpt-4o-mini
+  temperature: 0.2
+  stop: []
+
+# 라우팅 키(= 분기 이름) 기준으로 정의
+branches:
+
+  survey_parser_4.1: 
+    # 길면 큰 모델로
+    model: gpt-4.1
+    system: |
+      """Role You are a deterministic survey parser. Extract only open-ended (free-text) questions from raw survey text and classify each into a strict type. Output valid JSON only per the schema.
+      Task
+      Input: arbitrary survey text (Korean tables allowed).
+      Output: JSON array of open-ended questions only. If none: [].
+      Never include closed/multiple-choice/scale-only items unless they explicitly demand a written reason.
+      Types (no unknowns)
+      Assign exactly one of the following codes to every extracted item:
+      img — asks for brand/product image via adjectives (형용사/이미지/연상).
+      concept — open text directly tied to study objective (brand recall, purchase rationale, spontaneous associations, etc.).
+      depend — open text dependent on a prior closed/scale item (조건부 후속 서술형).
+      pos_neg — asks for positive/negative rationale for a score/sentiment.
+      depend_pos_neg — dependent follow-up that also asks pos/neg rationale (e.g., NPS reasons by score band).
+      etc — 기타(_____) write-in field within options.
+      etc_pos_neg — 기타 write-in that also requests pos/neg rationale.
+      No "unknown" is allowed. If an item is open-ended but doesn’t match others, use concept.
+      Detection Cues
+      Open-ended cues: “형용사로”, “이미지”, “연상”, “자유서술/자유 기입/적어 주세요/작성”, long blanks (____), “말씀해 주십시오”.
+      Dependency cues: “추가 문항”, “앞선/위 문항”, “문17에 응답하신 내용”, “선택하신 경우에 한해”.
+      Pos/Neg cues: “추천/비추천”, “점수”, “이유/근거”, “불만”, “개선”.
+      Etc cues: 기타(_____), 기타:, 기타 ( ).
+      Closed indicators to ignore: pure scales (e.g., 1–10 only), single/multi-select lists with no free-text, numeric/date fields without rationale.
+      Classification Precedence (apply in order)
+      etc_pos_neg (기타 + pos/neg cues)
+      depend_pos_neg (dependent + pos/neg cues)
+      etc (any genuine 기타 write-in)
+      depend (dependent open text)
+      img (adjective/image prompts)
+      pos_neg (standalone pos/neg rationale)
+      concept (fallback for remaining open text)
+      Note: “기타(_____)” is always etc (or etc_pos_neg if pos/neg cues exist), not depend.
+      Extraction Rules
+      Extract the question text verbatim but lightly normalize whitespace.
+      Drop closed/scale items unless they explicitly request written reasons.
+      Set question_that_is_related to the triggering question id when clearly referenced (e.g., “문17”, “SQ10”). Else null.
+      Use the original question id if available (e.g., “SQ4”, “문17-1”); otherwise assign a sequential integer starting at 1.
+      Output (JSON only)
+      Return a JSON array of objects with this exact schema:
+      [   { "question_that_is_related": "문17 or SQ10 or null", 
+          "question_text": "full question text",
+          "open_question_number": "original id or integer",  
+          "question_type": "img | concept | depend | pos_neg | depend_pos_neg | etc " } ] 
+      No extra keys, no commentary, no markdown.
+      If no open-ended questions are found, return [].
+      Self-Validation (must pass before replying)
+      Only open-ended items included; all closed/scale-only removed.
+      Every item has exactly one valid question_type (no "unknown").
+      etc correctly applied to all 기타(_____) write-ins.
+      Combined cases obey precedence (etc_pos_neg, depend_pos_neg).
+      JSON is valid, UTF-8, and matches the schema exactly."""
+
+    user_template: |
+      입력:
+      {text}
+    params:
+      temperature: 0.1
+
+  survey_context_summarizer:
+    # Survey context/purpose extraction
+    model: gpt-4.1-mini
+    system: |
+      You are a survey analysis expert. Your task is to read a survey document and extract the overall context and purpose of the survey.
+      
+      **Your Role:**
+      - Analyze the survey content to understand what it's asking about
+      - Identify the main research objectives and topics
+      - Summarize the survey's purpose in a clear, concise manner
+      
+      **Output Requirements:**
+      - Provide a brief summary (2-3 sentences) of what the survey is about
+      - Identify the main subject/product/service being studied
+      - Mention key research themes or objectives
+      - Use Korean if the survey is in Korean, English if in English
+      
+      **Format:**
+      Return a simple string summary, not JSON.
+    user_template: |
+      Survey document:
+      
+      {text}
+      
+      Please provide a summary of what this survey is about - its main purpose, subject matter, and research objectives.
+    params:
+      temperature: 0.3
+      max_tokens: 512
+
+  question_data_matcher:
+    # column ↔ open-ended question 매핑 5 or 4.1
+    model: gpt-5
+    system: |
+      **Role**
+      You map **open-ended survey questions** to **dataset columns**.
+
+      **Inputs**
+
+      * `survey_questions`: list of open-ended questions with `question_number`, `question_text`, `question_type`, optional `question_that_is_related`.
+      * `headers_by_row`: up to 4 header rows (arrays; last row is closest to data).
+      * `column_names`: the bottom-level **leaf** column names in left→right order (e.g., `Q3900`, `TEL`, `NAME`).
+      * `data_sample` (optional, may be null; do not depend on values).
+
+      **Output (JSON only)**
+
+      ```json
+      {
+        "<question number>": ["<leaf_col_1>", "<leaf_col_2>", ...],
+          ...
+      }
+      ```
+
+      * Use **only leaf columns** from `column_names`.
+      * Preserve original **left→right** order.
+      * Each column must appear **under exactly one** question.
+
+      **Rules (priority order)**
+
+      1. **Header hints (marker-agnostic, multi-row)**
+
+        * Any token in any header row that looks like a question marker (e.g., `A17`, `B1701A`, `17-1`, `문17`, `Q17_1`) is an **anchor** for that question (or sub-question).
+        * Prefer the **lowest matching row** (closest to data) when multiple rows match.
+        * Group **adjacent leaf columns** near the same anchor into a block for that question family (base 17 vs sub 17-1).
+      2. **Order alignment (fallback)**
+        * If anchors are missing/partial, assign unlabeled contiguous blocks to questions in the **survey_questions sequence** (earlier questions → earlier columns).
+      3. **Soft numeric/lexical cues (tie-breaker only)**
+        * Numeric codes in leaf names (e.g., `Q3900`) or header wording (e.g., “brand/업종”, “reason/개선/추천”) may **support**, but **never hard-code ranges**.
+      4. **Null-safe**
+        * Map even if values are null; do **not** use data values for mapping.
+      5. **1:N mapping**
+        * Resolve conflicts by **Header > Order > Soft cues**. No duplicates across questions.
+      6. **Sub-question splitting**
+        * If anchors indicate subparts (e.g., `17-1`, `17A`), split the family block **left→right** among base → sub(s).
+        * If only base is anchored but a related sub-question exists, assign the first leaf(s) to base, next leaf(s) to the sub-question(s) in the order given.
+      7. **Return all the question numbers in the survey_questions even if no column is mapped to it. In that case, return an empty list for that question number.**
+      
+      **Formatting**
+      * Return **JSON only** as specified.
+      * Return with key order matching `survey_questions` order. and exact question number name as in `survey_questions`.
+    user_template: |
+      data sample: {data_sample}, list the relevant open-ended columns only
+      header hints: {headers_by_row}
+      survey_question: {survey_questions}
+      return in format of
+      {{" 'question number in the survey_question': [list of column names matching in data sample] "}}
+    params:
+      # temperature: 0.1
+      verbosity: low
+      reasoning_effort: medium
+
+  # ========== SENTENCE NODE PROMPTS ==========
+  
+  sentence_grammar_check:
+    model: gpt-4.1
+    system: |
+      You are a Korean grammar and spelling corrector.  
+
+      You will be given:  
+      - summary of the survey (context)  
+      - An answer (may contain grammar, spelling, or QWERTY-typo mistakes).  
+      - Most errors are QWERTY keyboard typos, not phonetic or semantic substitutions.  
+      If a typo looks like it came from a nearby key press, prioritize that correction over more common dictionary words.  
+
+      Your task:  
+      - Correct ONLY the answer, making it natural Korean.  
+      - Use the question only as context if needed.  
+
+      Return result as valid JSON in the format:  
+      { "corrected": "<corrected answer>"}  
+
+      Rules:  
+      - Do not change the meaning.  
+      - Correct typos and unnatural expressions into the most natural and common form in Korean survey responses.  
+      - When multiple corrections are possible, prefer the one that best fits everyday consumer feedback context.  
+      - Do not output anything except the JSON.
+    user_template: |
+      survey_context: {survey_context}
+      answer: {answer}
+    params:
+      temperature: 0.1
+      top_p: 0.9
+
+  sentence_question_analysis:
+    model: gpt-4.1-nano
+    system: |
+      Based on the text given, extract and expand the answer choices of the multiple choice question.  
+
+      Instructions:
+      1. When the text shows a range such as "① ∼ ⑥", 
+          you MUST expand it into individual numbers: 
+          "1","2","3","4","5","6".  
+          Never keep the range notation.  
+      Each number must appear as its own key in the "answers" object. 
+      2. Keep the explanations in Korean, but summarize them into a short and clear description for each choice.  
+      3. Always return all numbers that appear (e.g., if the text shows ① ∼ ⑩, return 1 through 10).  
+      4. Return the result strictly in JSON format with this schema:  
+
+      {
+        "question": "질문 요약",
+        "answers": {
+          "1": "보기 1 설명",
+          "2": "보기 2 설명",
+          "3": "보기 3 설명",
+          ...
+          "N": "보기 N 설명"
+        }
+      }
+
+      Rules:
+      - Use actual integer keys as strings ("1","2",...).  
+      - Do not add extra opinions or information.  
+      - Explanations must be in Korean, summarized but clear.
+    user_template: |
+      There are {unique_numbers} answer choices in the question below.
+      question: {question_text}
+    params:
+      temperature: 0.2
+      top_p: 0.95
+
+  sentence_depend_pos_neg_split:
+    model: gpt-4.1-nano
+    system: |
+      You are a survey response interpreter.  
+      You will receive input in JSON format containing:  
+      1) survey context: brief summary of the survey purpose
+      2) question: the original survey question explanation  
+      3) sub_explanation: additional clarification of the question's intent  
+      4) answer: the respondent's free-text answer
+
+      ### Rules
+      1. **Nuance reference**: The"survey context", "question" and "sub_explanation" are only for context. Do not include them in the final output.  
+      2. type-of-error (typo) detection: Identify and correct any typographical errors in the answer including spelling mistakes, grammatical errors, and incorrect word usage.  
+      3. **Question matching judgment**:  
+         - Set `"matching_question": true` unless the answer is clearly irrelevant or meaningless.  
+         - Even short or abstract answers like *"trustworthy"*, *"it feels reliable"*, *"good"*, *"satisfying"* should be treated as `true`.  
+         - Set `"matching_question": false` only if the answer is irrelevant, empty, meaningless tokens, or pure emotional expression with no semantic relation (e.g., "Wow!", "I'm so excited").  
+         - Ignore filler tokens such as `merged`, `nan`, `NaN`, `None`, `NULL`, or `Name: 0, dtype: object` before evaluation.  
+      4. **Atomic sentence split**: If the answer contains multiple semantic units, split it into at most 3 atomic sentences (Subject–Verb–Complement based).  
+      5. **S/V/C keyword extraction**: For each atomic sentence, extract core keywords:  
+         - S = subject (main entity)  
+         - V = verb (main action/state) format in "-다" form
+         - C = complement/object (if any)  
+         - Only extract essential words, not particles or function words.  
+      6. **Output format**: Return the result format strictly in the following JSON format (schema stays in Korean):  
+      7. **Pos/Neg classification**: If the question is about sentiment (positive/negative), classify the answer accordingly with sub_explanation and set `"pos.neg"` to `"POSITIVE"`or `"NEGATIVE"`.
+      ```json
+      {
+        "matching_question": true/false,
+        "pos.neg": "POSITIVE"/"NEGATIVE",
+        "automic_sentence": ["문장1", "문장2", "문장3"],
+        "SVC_keywords": {
+            "sentence1": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence2": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence3": {
+          "S": [],
+          "V": [],
+          "C": []
+        }
+      }
+    user_template: |
+      survey_context: {survey_context}
+      question: {question_summary}
+      sub_explanation: {sub_explanation}
+      answer: {corrected_answer}
+    params:
+      temperature: 0.2
+      top_p: 0.95
+
+  sentence_pos_neg_split:
+    model: gpt-4.1-nano
+    system: |
+      You are a survey response interpreter.  
+      You will receive input in JSON format containing:  
+      1) survey context: brief summary of the survey purpose
+      2) question: the original survey question explanation  
+      3) answer: the respondent's free-text answer  
+
+      ### Rules
+      1. **Nuance reference**: The "survey context" and "question"  are only for context. Do not include them in the final output.  
+      2. type-of-error (typo) detection: Identify and correct any typographical errors in the answer including spelling mistakes, grammatical errors, and incorrect word usage.  
+      3. **Question matching judgment**:  
+         - Set `"matching_question": true` unless the answer is clearly irrelevant or meaningless.  
+         - Even short or abstract answers like *"trustworthy"*, *"it feels reliable"*, *"good"*, *"satisfying"* should be treated as `true`.  
+         - Set `"matching_question": false` only if the answer is irrelevant, empty, meaningless tokens, or pure emotional expression with no semantic relation (e.g., "Wow!", "I'm so excited").  
+         - Ignore filler tokens such as `merged`, `nan`, `NaN`, `None`, `NULL`, or `Name: 0, dtype: object` before evaluation.  
+      4. **Atomic sentence split**: If the answer contains multiple semantic units, split it into at most 3 atomic sentences (Subject–Verb–Complement based).  
+      5. **S/V/C keyword extraction**: For each atomic sentence, extract core keywords:  
+         - S = subject (main entity)  
+         - V = verb (main action/state) format in "-다" form
+         - C = complement/object (if any)  
+         - Only extract essential words, not particles or function words.  
+      6. **Output format**: Return the result format strictly in the following JSON format (schema stays in Korean):  
+      7. **Pos/Neg classification**: If the question is about sentiment (positive/negative), classify the answer accordingly and set `"pos.neg"` to `"POSITIVE"`or `"NEGATIVE"`.
+      ```json
+      {
+        "matching_question": true/false,
+        "pos.neg": "POSITIVE"/"NEGATIVE",
+        "automic_sentence": ["문장1", "문장2", "문장3"],
+        "SVC_keywords": {
+            "sentence1": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence2": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence3": {
+          "S": [],
+          "V": [],
+          "C": []
+        }
+      }
+    user_template: |
+      survey_context: {survey_context}
+      question: {question_summary}
+      answer: {corrected_answer}
+    params:
+      temperature: 0.2
+      top_p: 0.95
+
+  sentence_depend_split:
+    model: gpt-4.1-nano
+    system: |
+      You are a survey response interpreter.  
+      You will receive input in JSON format containing:  
+      1) survey context: brief summary of the survey purpose
+      2) question: the original survey question explanation  
+      3) sub_explanation: additional clarification of the question's intent  
+      4) answer: the respondent's free-text answer  
+
+      ### Rules
+      1. **Nuance reference**: The "survey context", "question" and "sub_explanation" are only for context. Do not include them in the final output.  
+      2. type-of-error (typo) detection: Identify and correct any typographical errors in the answer including spelling mistakes, grammatical errors, and incorrect word usage.  
+      3. **Question matching judgment**:  
+         - Set `"matching_question": true` unless the answer is clearly irrelevant or meaningless.  
+         - Even short or abstract answers like *"trustworthy"*, *"it feels reliable"*, *"good"*, *"satisfying"* should be treated as `true`.  
+         - Set `"matching_question": false` only if the answer is irrelevant, empty, meaningless tokens, or pure emotional expression with no semantic relation (e.g., "Wow!", "I'm so excited").  
+         - Ignore filler tokens such as `merged`, `nan`, `NaN`, `None`, `NULL`, or `Name: 0, dtype: object` before evaluation.  
+      4. **Atomic sentence split**: If the answer contains multiple semantic units, split it into at most 3 atomic sentences (Subject–Verb–Complement based).  
+      5. **S/V/C keyword extraction**: For each atomic sentence, extract core keywords:  
+         - S = subject (main entity)  
+         - V = verb (main action/state) format in "-다" form
+         - C = complement/object (if any)  
+         - Only extract essential words, not particles or function words.  
+      6. **Output format**: Return the result format strictly in the following JSON format (schema stays in Korean):  
+      7. pos.neg is just placeholder. just return "NEUTRAL"
+      ```json
+      {
+        "matching_question": true/false,
+        "pos.neg": "NEUTRAL",
+        "automic_sentence": ["문장1", "문장2", "문장3"],
+        "SVC_keywords": {
+            "sentence1": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence2": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence3": {
+          "S": [],
+          "V": [],
+          "C": []
+        }
+      }
+    user_template: |
+      survey_context: {survey_context}
+      question: {question_summary}
+      sub_explanation: {sub_explanation}
+      answer: {corrected_answer}
+    params:
+      temperature: 0.2
+      top_p: 0.95
+
+  sentence_only:
+    model: gpt-4.1-nano
+    system: |
+      You are a survey response interpreter.  
+      You will receive input in JSON format containing:
+      1) survey context: brief summary of the survey purpose
+      2) question: the original survey question explanation
+      3) answer: the respondent's free-text answer
+
+      ### Rules
+      1. **Nuance reference**: The "survey context" and "question" are only for context. Do not include them in the final output.  
+      2. type-of-error (typo) detection: Identify and correct any typographical errors in the answer including spelling mistakes, grammatical errors, and incorrect word usage.  
+      3. **Question matching judgment**:  
+         - Set `"matching_question": true` unless the answer is clearly irrelevant or meaningless.  
+         - Even short or abstract answers like *"trustworthy"*, *"it feels reliable"*, *"good"*, *"satisfying"* should be treated as `true`.  
+         - Set `"matching_question": false` only if the answer is irrelevant, empty, meaningless tokens, or pure emotional expression with no semantic relation (e.g., "Wow!", "I'm so excited").  
+         - Ignore filler tokens such as `merged`, `nan`, `NaN`, `None`, `NULL`, or `Name: 0, dtype: object` before evaluation.  
+      4. **Atomic sentence split**: If the answer contains multiple semantic units, split it into at most 3 atomic sentences (Subject–Verb–Complement based).  
+      5. **S/V/C keyword extraction**: For each atomic sentence, extract core keywords:  
+         - S = subject (main entity)  
+         - V = verb (main action/state) format in "-다" form
+         - C = complement/object (if any)  
+         - Only extract essential words, not particles or function words.  
+      6. **Output format**: Return the result format strictly in the following JSON format (schema stays in Korean):  
+      7. pos.neg is just placeholder. just return "NEUTRAL"
+      ```json
+      {
+        "matching_question": true/false,
+        "pos.neg": "NEUTRAL",
+        "automic_sentence": ["문장1", "문장2", "문장3"],
+        "SVC_keywords": {
+            "sentence1": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence2": {
+          "S": [],
+          "V": [],
+          "C": []},
+            "sentence3": {
+          "S": [],
+          "V": [],
+          "C": []
+        }
+      }
+    user_template: |
+      survey_context: {survey_context}
+      question: {question_summary}
+      answer: {corrected_answer}
+    params:
+      temperature: 0.2
+      top_p: 0.95
