@@ -101,7 +101,6 @@ def stage2_word_node(state: Dict[str, Any], deps: Optional[Any] = None) -> Dict[
             matched_questions[current_question_id]['stage2_data'] = {
                 'csv_path': csv_path,
                 'processing_type': 'WORD',
-                'rows_count': len(result_df),
                 'timestamp': timestamp,
                 'status': 'completed'
             }
@@ -109,11 +108,6 @@ def stage2_word_node(state: Dict[str, Any], deps: Optional[Any] = None) -> Dict[
         # 결과 상태 반환
         updated_state = {
             **state,
-            'stage2_word_processed': True,
-            'stage2_processing_type': 'WORD',
-            'stage2_status': 'completed',
-            'stage2_result_csv': csv_path,
-            'stage2_processed_rows': len(result_df),
             'matched_questions': matched_questions  # 업데이트된 matched_questions
         }
         

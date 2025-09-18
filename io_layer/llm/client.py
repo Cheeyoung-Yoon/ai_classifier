@@ -107,7 +107,8 @@ class LLMClient:
         if schema is None:
             return self.llm
         # LangChain은 Pydantic 모델/타입 또는 JSON Schema dict 모두 지원
-        return self.llm.with_structured_output(schema=schema, include_raw=True)
+        # OpenAI structured output compatibility를 위해 method="function_calling" 사용
+        return self.llm.with_structured_output(schema=schema, include_raw=True, method="function_calling")
 
     # -------- 단건 호출 --------
     def chat(
