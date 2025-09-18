@@ -1,11 +1,11 @@
 """
 Stage2 SENTENCE Node - Handles SENTENCE type questions
 """
-import os
 import json
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io_layer.llm.client import LLMClient
 from io_layer.embedding import VectorEmbedding
 from .prep_sentence import get_column_locations, extract_question_choices
@@ -109,223 +109,241 @@ def stage2_sentence_node(state: Dict[str, Any], deps: Optional[Any] = None) -> D
                 print(f"Error extracting question choices: {e}")
                 response_dict = {}
         
-        # 두 단계 LLM 처리
-        result_data = []
-        total_price = 0
-        
-        # 테스트용으로 10개만 처리
-        # test_limit = min(10, len(text_df))
-        test_limit = len(text_df)
-        # print(f"🧪 TEST MODE: Processing only {test_limit} rows (out of {len(text_df)})")
-        
-        for i in range( len(text_df)):
-            # 원본 텍스트 추출
-            row_texts = text_df.iloc[i].dropna().astype(str).tolist()
-            if not row_texts:
+        # 두 단계 LLM 처리 (멀티스레드 지원)
+        fallback_grammar_system = (
+            """Correct grammar and typos in Korean survey responses.\n\n"
+            "- Correct ONLY the answer, making it natural Korean.\n"
+            "- Use the question only as context if needed.\n\n"
+            "Return result as valid JSON in the format:\n"
+            '{ "corrected": "<corrected answer>" }\n\n'
+            "Rules:\n"
+            "- Do not change the meaning.\n"
+            "- Correct typos and unnatural expressions into the most natural and common form in Korean survey responses.\n"
+            "- When multiple corrections are possible, prefer the one that best fits everyday consumer feedback context.\n"
+            "- Do not output anything except the JSON."""
+        )
+
+        grammar_schema = grammar_branch.get('schema') if grammar_branch else None
+        grammar_system = grammar_branch['system'] if grammar_branch else None
+        grammar_template = grammar_branch['user_template'] if grammar_branch else None
+
+        analysis_schema = analysis_branch.get('schema') if analysis_branch else None
+        analysis_system = analysis_branch['system'] if analysis_branch else None
+        analysis_template = analysis_branch['user_template'] if analysis_branch else None
+
+        process_items = []
+        for idx in range(len(text_df)):
+            row_values = text_df.iloc[idx].dropna().astype(str).tolist()
+            if not row_values:
                 continue
-            original_text = row_texts[0].strip()
-            
-            # 1단계: 문법 교정 (llm_client_large)
-            if grammar_branch:
-                # Config에서 로드된 prompt 사용
-                grammar_prompt = grammar_branch['user_template'].format(
-                    survey_context=survey_context,
-                    answer=original_text
-                )
-                grammar_system = grammar_branch['system']
-            else:
-                # Fallback: 기존 하드코딩된 prompt
-                grammar_prompt = f"""
-summary of the survey: {survey_context}
-answer: {original_text}
-"""
-                grammar_system = """Correct grammar and typos in Korean survey responses.
+            original_text = row_values[0].strip()
+            if not original_text:
+                continue
 
-- Correct ONLY the answer, making it natural Korean.  
-- Use the question only as context if needed.  
-
-Return result as valid JSON in the format:  
-{ "corrected": "<corrected answer>"}  
-
-Rules:  
-- Do not change the meaning.  
-- Correct typos and unnatural expressions into the most natural and common form in Korean survey responses.  
-- When multiple corrections are possible, prefer the one that best fits everyday consumer feedback context.  
-- Do not output anything except the JSON."""
-            
-            grammar_response = llm_client_large.chat(
-                system=grammar_system,
-                user=grammar_prompt,
-                schema=grammar_branch.get('schema') if grammar_branch else None
-            )
-            
-            # Schema 기반 응답 처리
-            if grammar_branch and grammar_branch.get('schema'):
-                data = extract_llm_response_data(grammar_response[0])
-                corrected_text = data.get('corrected', original_text)
-            else:
-                # Fallback: JSON 파싱
-                try:
-                    corrected_data = json.loads(grammar_response[0])
-                    corrected_text = corrected_data['corrected']
-                except json.JSONDecodeError:
-                    corrected_text = original_text
-                
-            # 비용 계산
-            if hasattr(grammar_response[1], 'cost_usd'):
-                total_price += grammar_response[1].cost_usd
-            elif hasattr(grammar_response[1], 'total_cost'):
-                total_price += grammar_response[1].total_cost
-            
-            # 2단계: 문장 분석 (llm_client_nano)
-            if analysis_branch:
-                # Config에서 로드된 prompt 사용
-                if current_question_type in ["depend", "depend_pos_neg"] and depend_df is not None:
-                    depend_value = str(int(depend_df.iloc[i, 0]))
-                    # response_dict가 dict인지 확인하고 안전하게 접근
-                    if isinstance(response_dict, dict):
-                        sub_explanation = response_dict.get(depend_value, "")
-                    else:
-                        sub_explanation = ""
-                        print(f"Warning: response_dict is not a dictionary, type: {type(response_dict)}")
-                    
-                    analysis_prompt = analysis_branch['user_template'].format(
-                        survey_context=survey_context,
-                        question_summary=question_summary,
-                        sub_explanation=sub_explanation,
-                        corrected_answer=corrected_text
-                    )
-                else:
-                    analysis_prompt = analysis_branch['user_template'].format(
-                        survey_context=survey_context,
-                        question_summary=question_summary,
-                        corrected_answer=corrected_text
-                    )
-                
-                analysis_system = analysis_branch['system']
-            else:
-                # Fallback: 기존 하드코딩된 prompt
-                if current_question_type in ["depend", "depend_pos_neg"] and depend_df is not None:
-                    depend_value = str(int(depend_df.iloc[i, 0]))
-                    # response_dict가 dict인지 확인하고 안전하게 접근
-                    if isinstance(response_dict, dict):
-                        sub_explanation = response_dict.get(depend_value, "")
-                    else:
-                        sub_explanation = ""
-                        print(f"Warning: response_dict is not a dictionary, type: {type(response_dict)}")
-                    
-                    analysis_prompt = f"""
-                        question: {question_summary}
-                        sub_explanation: {sub_explanation}
-                        answer: {corrected_text}
-                        """
-                else:
-                    analysis_prompt = f"""
-                        question: {question_summary}
-                        answer: {corrected_text}
-                        """
-                                        
-
-            analysis_response = llm_client_nano.chat(
-                system=analysis_system,
-                user=analysis_prompt,
-                schema=analysis_branch.get('schema') if analysis_branch else None
-            )
-            
-            # Schema 기반 응답 처리
-            if analysis_branch and analysis_branch.get('schema'):
-                data = extract_llm_response_data(analysis_response[0])
-            else:
-                # Fallback: JSON 파싱
-                try:
-                    data = json.loads(analysis_response[0])
-                except json.JSONDecodeError:
+            depend_value = None
+            if current_question_type in ["depend", "depend_pos_neg"] and depend_df is not None and idx < len(depend_df):
+                depend_raw = depend_df.iloc[idx, 0]
+                if pd.notna(depend_raw):
                     try:
-                        data = json.loads(analysis_response[0].replace('```json', '').replace('```', ''))
-                    except:
-                        continue
-            
-            # data가 list인 경우 첫 번째 요소를 사용하거나 기본 dict 구조 생성
-            if isinstance(data, list):
-                if len(data) > 0 and isinstance(data[0], dict):
-                    data = data[0]
+                        depend_value = str(int(depend_raw))
+                    except (ValueError, TypeError):
+                        depend_value = str(depend_raw)
+
+            process_items.append({
+                'index': idx,
+                'original_text': original_text,
+                'depend_value': depend_value
+            })
+
+        total_targets = len(process_items)
+        if total_targets == 0:
+            print("No valid responses found for SENTENCE processing.")
+            result_data = []
+            total_price = 0.0
+        else:
+            max_workers = min(8, total_targets)
+            results_map: Dict[int, Dict[str, Any]] = {}
+            total_price = 0.0
+            processed_count = 0
+
+            def process_row(item: Dict[str, Any]):
+                idx = item['index']
+                original_text = item['original_text']
+                depend_value = item.get('depend_value')
+                row_cost = 0.0
+
+                if grammar_template:
+                    grammar_prompt = grammar_template.format(
+                        survey_context=survey_context,
+                        answer=original_text
+                    )
+                    grammar_system_local = grammar_system
                 else:
-                    # 기본 구조 생성
+                    grammar_prompt = (
+                        f"summary of the survey: {survey_context}\n"
+                        f"answer: {original_text}\n"
+                    )
+                    grammar_system_local = fallback_grammar_system
+
+                grammar_resp, grammar_log = llm_client_large.chat(
+                    system=grammar_system_local,
+                    user=grammar_prompt,
+                    schema=grammar_schema
+                )
+                row_cost += getattr(grammar_log, 'cost_usd', 0.0)
+
+                if grammar_schema:
+                    grammar_data = extract_llm_response_data(grammar_resp)
+                    corrected_text = grammar_data.get('corrected', original_text)
+                else:
+                    try:
+                        corrected_data = json.loads(grammar_resp)
+                        corrected_text = corrected_data.get('corrected', original_text)
+                    except (json.JSONDecodeError, TypeError):
+                        corrected_text = original_text
+
+                if analysis_template:
+                    if current_question_type in ["depend", "depend_pos_neg"] and depend_value is not None:
+                        sub_explanation = ""
+                        if isinstance(response_dict, dict):
+                            sub_explanation = response_dict.get(depend_value, "")
+                        else:
+                            print(f"Warning: response_dict is not a dictionary, type: {type(response_dict)}")
+                        analysis_prompt = analysis_template.format(
+                            survey_context=survey_context,
+                            question_summary=question_summary,
+                            sub_explanation=sub_explanation,
+                            corrected_answer=corrected_text
+                        )
+                    else:
+                        analysis_prompt = analysis_template.format(
+                            survey_context=survey_context,
+                            question_summary=question_summary,
+                            corrected_answer=corrected_text
+                        )
+                    analysis_system_local = analysis_system
+                else:
+                    if current_question_type in ["depend", "depend_pos_neg"] and depend_value is not None:
+                        sub_explanation = ""
+                        if isinstance(response_dict, dict):
+                            sub_explanation = response_dict.get(depend_value, "")
+                        else:
+                            print(f"Warning: response_dict is not a dictionary, type: {type(response_dict)}")
+                        analysis_prompt = (
+                            f"question: {question_summary}\n"
+                            f"sub_explanation: {sub_explanation}\n"
+                            f"answer: {corrected_text}\n"
+                        )
+                    else:
+                        analysis_prompt = (
+                            f"question: {question_summary}\n"
+                            f"answer: {corrected_text}\n"
+                        )
+                    analysis_system_local = None
+
+                analysis_resp, analysis_log = llm_client_nano.chat(
+                    system=analysis_system_local,
+                    user=analysis_prompt,
+                    schema=analysis_schema
+                )
+                row_cost += getattr(analysis_log, 'cost_usd', 0.0)
+
+                if analysis_schema:
+                    data = extract_llm_response_data(analysis_resp)
+                else:
+                    try:
+                        data = json.loads(analysis_resp)
+                    except json.JSONDecodeError:
+                        try:
+                            cleaned = analysis_resp.replace('```json', '').replace('```', '')
+                            data = json.loads(cleaned)
+                        except Exception:
+                            data = None
+
+                if isinstance(data, list):
+                    data = data[0] if data and isinstance(data[0], dict) else None
+
+                if not isinstance(data, dict):
                     data = {
                         'matching_question': False,
-                        'pos.neg': 'NEUTRAL',
+                        'pos_neg': 'NEUTRAL',
                         'automic_sentence': [],
                         'SVC_keywords': {}
                     }
-            elif not isinstance(data, dict):
-                # data가 dict도 list도 아닌 경우 기본 구조 생성
-                data = {
-                    'matching_question': False,
-                    'pos.neg': 'NEUTRAL', 
-                    'automic_sentence': [],
-                    'SVC_keywords': {}
+
+                data.setdefault('matching_question', False)
+                data.setdefault('pos_neg', data.get('pos.neg', 'NEUTRAL'))
+                data.setdefault('automic_sentence', [])
+                data.setdefault('SVC_keywords', {})
+
+                if not isinstance(data['automic_sentence'], list):
+                    data['automic_sentence'] = []
+                if not isinstance(data['SVC_keywords'], dict):
+                    data['SVC_keywords'] = {}
+
+                return {
+                    'index': idx,
+                    'original_text': original_text,
+                    'corrected_text': corrected_text,
+                    'matching_question': data.get('matching_question', False),
+                    'pos_neg': data.get('pos_neg', 'NEUTRAL') or 'NEUTRAL',
+                    'automic_sentence': data.get('automic_sentence', []),
+                    'svc_keywords': data.get('SVC_keywords', {})
+                }, row_cost
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {executor.submit(process_row, item): item['index'] for item in process_items}
+
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        print(f"Error processing response #{idx + 1}: {exc}")
+                        continue
+
+                    if not result:
+                        continue
+
+                    row_payload, row_cost = result
+                    results_map[idx] = row_payload
+                    total_price += row_cost
+                    processed_count += 1
+                    print(f"Processed {processed_count}/{total_targets} responses, Total cost: ${total_price:.4f}")
+
+            result_data = []
+            for idx in sorted(results_map.keys()):
+                payload = results_map[idx]
+                original_text = payload['original_text']
+                corrected_text = payload['corrected_text']
+                automic_sentence = payload.get('automic_sentence', [])
+                svc_keywords = payload.get('svc_keywords', {})
+
+                row_data = {
+                    'id': idx,
+                    'pos.neg': payload.get('pos_neg', 'NEUTRAL'),
+                    'matching_question': payload.get('matching_question', False),
+                    'org_text': original_text,
+                    'correction_text': corrected_text,
+                    'org_text_embed': embed.embed(original_text) if original_text.strip() else [],
+                    'correction_text_embed': embed.embed(corrected_text) if corrected_text.strip() else [],
+                    'sentence_1': automic_sentence[0] if len(automic_sentence) > 0 else None,
+                    'sentence_2': automic_sentence[1] if len(automic_sentence) > 1 else None,
+                    'sentence_3': automic_sentence[2] if len(automic_sentence) > 2 else None,
+                    'sentence_1_embed': embed.embed(automic_sentence[0]) if len(automic_sentence) > 0 and automic_sentence[0] and str(automic_sentence[0]).strip() else [],
+                    'sentence_2_embed': embed.embed(automic_sentence[1]) if len(automic_sentence) > 1 and automic_sentence[1] and str(automic_sentence[1]).strip() else [],
+                    'sentence_3_embed': embed.embed(automic_sentence[2]) if len(automic_sentence) > 2 and automic_sentence[2] and str(automic_sentence[2]).strip() else [],
+                    'S_1': ', '.join(svc_keywords.get('sentence1', {}).get('S', [])),
+                    'V_1': ', '.join(svc_keywords.get('sentence1', {}).get('V', [])),
+                    'C_1': ', '.join(svc_keywords.get('sentence1', {}).get('C', [])),
+                    'S_2': ', '.join(svc_keywords.get('sentence2', {}).get('S', [])),
+                    'V_2': ', '.join(svc_keywords.get('sentence2', {}).get('V', [])),
+                    'C_2': ', '.join(svc_keywords.get('sentence2', {}).get('C', [])),
+                    'S_3': ', '.join(svc_keywords.get('sentence3', {}).get('S', [])),
+                    'V_3': ', '.join(svc_keywords.get('sentence3', {}).get('V', [])),
+                    'C_3': ', '.join(svc_keywords.get('sentence3', {}).get('C', []))
                 }
-                    
-            # 비용 계산
-            if hasattr(analysis_response[1], 'cost_usd'):
-                total_price += analysis_response[1].cost_usd
-            elif hasattr(analysis_response[1], 'total_cost'):
-                total_price += analysis_response[1].total_cost
-            
-            # 데이터 검증 및 기본값 설정
-            if not isinstance(data, dict):
-                data = {
-                    'matching_question': False,
-                    'pos_neg': 'NEUTRAL',
-                    'automic_sentence': [],
-                    'SVC_keywords': {}
-                }
-            
-            # 기본값 설정
-            data.setdefault('matching_question', False)
-            data.setdefault('pos_neg', 'NEUTRAL') 
-            data.setdefault('automic_sentence', [])
-            data.setdefault('SVC_keywords', {})
-            
-            # automic_sentence가 리스트인지 확인
-            if not isinstance(data['automic_sentence'], list):
-                data['automic_sentence'] = []
-                
-            # SVC_keywords가 dict인지 확인
-            if not isinstance(data['SVC_keywords'], dict):
-                data['SVC_keywords'] = {}
-            
-            # 결과 DataFrame 행 생성
-            automic_sentence = data['automic_sentence']
-            svc_keywords = data['SVC_keywords']
-            
-            row_data = {
-                'id': i,
-                'pos.neg': data.get('pos_neg', 'NEUTRAL'),
-                'matching_question': data.get('matching_question', False),
-                'org_text': original_text,
-                'correction_text': corrected_text,
-                'org_text_embed': embed.embed(original_text) if original_text.strip() else [],
-                'correction_text_embed': embed.embed(corrected_text) if corrected_text.strip() else [],
-                'sentence_1': automic_sentence[0] if len(automic_sentence) > 0 else None,
-                'sentence_2': automic_sentence[1] if len(automic_sentence) > 1 else None,
-                'sentence_3': automic_sentence[2] if len(automic_sentence) > 2 else None,
-                'sentence_1_embed': embed.embed(automic_sentence[0]) if len(automic_sentence) > 0 and automic_sentence[0] and str(automic_sentence[0]).strip() else [],
-                'sentence_2_embed': embed.embed(automic_sentence[1]) if len(automic_sentence) > 1 and automic_sentence[1] and str(automic_sentence[1]).strip() else [],
-                'sentence_3_embed': embed.embed(automic_sentence[2]) if len(automic_sentence) > 2 and automic_sentence[2] and str(automic_sentence[2]).strip() else [],
-                'S_1': ', '.join(svc_keywords.get('sentence1', {}).get('S', [])),
-                'V_1': ', '.join(svc_keywords.get('sentence1', {}).get('V', [])),
-                'C_1': ', '.join(svc_keywords.get('sentence1', {}).get('C', [])),
-                'S_2': ', '.join(svc_keywords.get('sentence2', {}).get('S', [])),
-                'V_2': ', '.join(svc_keywords.get('sentence2', {}).get('V', [])),
-                'C_2': ', '.join(svc_keywords.get('sentence2', {}).get('C', [])),
-                'S_3': ', '.join(svc_keywords.get('sentence3', {}).get('S', [])),
-                'V_3': ', '.join(svc_keywords.get('sentence3', {}).get('V', [])),
-                'C_3': ', '.join(svc_keywords.get('sentence3', {}).get('C', []))
-            }
-            
-            result_data.append(row_data)
-            print(f"Processed {i+1}/{test_limit} responses, Total cost: ${total_price:.4f}")
+                result_data.append(row_data)
         
         # DataFrame 생성
         result_df = pd.DataFrame(result_data)

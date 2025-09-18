@@ -84,8 +84,25 @@ def test_full_pipeline():
         else:
             print(f"⚠️ Stage 2: Question type not determined")
             
-        if result.get("stage2_csv_output_path"):
-            print(f"✅ Stage 2: CSV output saved to {result['stage2_csv_output_path']}")
+        # Check for Stage 2 CSV outputs (check actual files)
+        import os
+        import glob
+        project_name = result.get('project_name', 'test')
+        stage2_results_path = f"data/{project_name}/temp_data/stage2_results"
+        
+        csv_files = []
+        if os.path.exists(stage2_results_path):
+            csv_files = glob.glob(f"{stage2_results_path}/stage2_*.csv")
+            # Get only today's files for this run
+            today_files = [f for f in csv_files if "20250918" in f]
+            if today_files:
+                csv_files = today_files
+        
+        if csv_files:
+            print(f"✅ Stage 2: {len(csv_files)} CSV output(s) generated")
+            for csv_file in sorted(csv_files)[-5:]:  # Show last 5 files
+                filename = os.path.basename(csv_file)
+                print(f"    📄 {filename}")
         else:
             print(f"⚠️ Stage 2: No CSV output generated")
             

@@ -60,9 +60,11 @@ def _extract_usage_and_model(resp, fallback_model: str):
     usage = meta.get("usage", {}) or meta.get("token_usage", {}) or {}
     if usage:
         model_name = meta.get("model_name") or meta.get("model") or fallback_model
+        pt = usage.get("prompt_tokens", 0)
+        ct = usage.get("completion_tokens", 0)
         return {
-            "prompt_tokens": usage.get("prompt_tokens", 0),
-            "completion_tokens": usage.get("completion_tokens", 0),
+            "prompt_tokens": pt,
+            "completion_tokens": ct,
         }, model_name
 
     # 3) 모두 실패하면 0으로
@@ -132,7 +134,15 @@ class LLMClient:
         resp = llm.invoke(messages, **kwargs)
         latency_ms = int((time.time() - t0) * 1000)
 
-        usage, model_name = _extract_usage_and_model(resp, self.cfg.name)
+        # structured output with include_raw=True인 경우 응답 구조 처리
+        if schema is not None and hasattr(resp, 'get') and 'raw' in resp:
+            # include_raw=True인 경우: {"parsed": ..., "raw": AIMessage}
+            raw_resp = resp['raw']
+            usage, model_name = _extract_usage_and_model(raw_resp, self.cfg.name)
+        else:
+            # 일반적인 경우
+            usage, model_name = _extract_usage_and_model(resp, self.cfg.name)
+            
         cost = _calc_cost(self.cfg, usage)
 
         log = UsageLog(
@@ -184,7 +194,15 @@ class LLMClient:
         outputs: List[Any] = []
 
         for r in resps:
-            usage, _ = _extract_usage_and_model(r, self.cfg.name)
+            # structured output with include_raw=True인 경우 응답 구조 처리
+            if schema is not None and hasattr(r, 'get') and 'raw' in r:
+                # include_raw=True인 경우: {"parsed": ..., "raw": AIMessage}
+                raw_resp = r['raw']
+                usage, _ = _extract_usage_and_model(raw_resp, self.cfg.name)
+            else:
+                # 일반적인 경우
+                usage, _ = _extract_usage_and_model(r, self.cfg.name)
+                
             total_pt += usage.get("prompt_tokens", 0)
             total_ct += usage.get("completion_tokens", 0)
 
