@@ -215,63 +215,17 @@ Rules:
                         print(f"Warning: response_dict is not a dictionary, type: {type(response_dict)}")
                     
                     analysis_prompt = f"""
-question: {question_summary}
-sub_explanation: {sub_explanation}
-answer: {corrected_text}
-"""
+                        question: {question_summary}
+                        sub_explanation: {sub_explanation}
+                        answer: {corrected_text}
+                        """
                 else:
                     analysis_prompt = f"""
-question: {question_summary}
-answer: {corrected_text}
-"""
-                
-                # 시스템 프롬프트 (질문 타입별)
-                if current_question_type == "depend_pos_neg":
-                    pos_neg_rule = "7. **Pos/Neg classification**: If the question is about sentiment (positive/negative), classify the answer accordingly with sub_explanation and set `\"pos.neg\"` to `\"POSITIVE\"`or `\"NEGATIVE\"`."
-                elif current_question_type == "pos_neg":
-                    pos_neg_rule = "7. **Pos/Neg classification**: If the question is about sentiment (positive/negative), classify the answer accordingly and set `\"pos.neg\"` to `\"POSITIVE\"`or `\"NEGATIVE\"`."
-                else:
-                    pos_neg_rule = "7. pos.neg is just placeholder. just return \"NEUTRAL\""
-                
-                analysis_system = f"""You are a survey response interpreter.
+                        question: {question_summary}
+                        answer: {corrected_text}
+                        """
+                                        
 
-### Rules
-1. **Nuance reference**: Context fields are only for reference. Do not include them in the final output.  
-2. type-of-error (typo) detection: Identify and correct any typographical errors in the answer including spelling mistakes, grammatical errors, and incorrect word usage.  
-3. **Question matching judgment**:  
-   - Set `"matching_question": true` unless the answer is clearly irrelevant or meaningless.  
-   - Even short or abstract answers like *"trustworthy"*, *"it feels reliable"*, *"good"*, *"satisfying"* should be treated as `true`.  
-   - Set `"matching_question": false` only if the answer is irrelevant, empty, meaningless tokens, or pure emotional expression with no semantic relation (e.g., "Wow!", "I'm so excited").  
-   - Ignore filler tokens such as `merged`, `nan`, `NaN`, `None`, `NULL`, or `Name: 0, dtype: object` before evaluation.  
-4. **Atomic sentence split**: If the answer contains multiple semantic units, split it into at most 3 atomic sentences (Subject–Verb–Complement based).  
-5. **S/V/C keyword extraction**: For each atomic sentence, extract core keywords:  
-   - S = subject (main entity)  
-   - V = verb (main action/state) format in "-다" form
-   - C = complement/object (if any)  
-   - Only extract essential words, not particles or function words.  
-6. **Output format**: Return the result format strictly in the following JSON format (schema stays in Korean):
-{pos_neg_rule}
-
-{{{{
-  "matching_question": true/false,
-  "pos.neg": "POSITIVE"/"NEGATIVE"/"NEUTRAL",
-  "automic_sentence": ["문장1", "문장2", "문장3"],
-  "SVC_keywords": {{{{
-      "sentence1": {{{{
-    "S": [],
-    "V": [],
-    "C": []}}}},
-      "sentence2": {{{{
-    "S": [],
-    "V": [],
-    "C": []}}}},
-      "sentence3": {{{{
-    "S": [],
-    "V": [],
-    "C": []
-  }}}}
-}}}}"""
-            
             analysis_response = llm_client_nano.chat(
                 system=analysis_system,
                 user=analysis_prompt,
