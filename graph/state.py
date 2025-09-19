@@ -58,10 +58,38 @@ class GraphState(TypedDict):
     grammar_corrected_text: Optional[str]      # Grammar-corrected version for SENTENCE type
     sentence_analysis_result: Optional[Dict[str, Any]]  # Sentence analysis result
     
-    # Stage 3 classification fields
+    # Stage 3 classification fields - New Two-Phase Approach
     stage3_mode: Optional[str]                 # MCL mode: estimate/auto_train/manual_train
     stage3_status: Optional[str]               # Status: completed/failed/skipped
     stage3_error: Optional[str]                # Error message if failed
+    stage3_current_phase: Optional[str]        # Current phase: phase1_labeling/phase2_labeling
+    
+    # Phase 1: Primary Labeling (kNN → CSLS → MCL with singletons)
+    stage3_phase1_status: Optional[str]        # Phase 1 status
+    stage3_phase1_knn_k: Optional[int]         # kNN parameter k (30-80)
+    stage3_phase1_csls_threshold: Optional[float]  # CSLS threshold τ_edge
+    stage3_phase1_mcl_inflation: Optional[float]   # MCL inflation r (1.6-2.2)
+    stage3_phase1_mcl_expansion: Optional[int]     # MCL expansion (default=2)
+    stage3_phase1_mcl_pruning: Optional[float]     # MCL pruning threshold (1e-3)
+    stage3_phase1_top_m: Optional[int]         # Top-m edges to keep (15-25)
+    stage3_phase1_groups: Optional[Dict[str, Any]] # Primary groups (GroupID, members, prototypes)
+    stage3_phase1_prototypes: Optional[Dict[str, Any]]  # Representative sentences (medoids)
+    stage3_phase1_metadata: Optional[Dict[str, Any]]    # Group metadata (size, keywords, co-context)
+    stage3_phase1_quality_stats: Optional[Dict[str, Any]]  # Quality statistics (CSLS, SubsetScore)
+    
+    # Phase 2: Secondary Labeling (Topic/Semantic Integration)
+    stage3_phase2_status: Optional[str]        # Phase 2 status
+    stage3_phase2_mode: Optional[str]          # human_in_loop/llm_assisted
+    stage3_phase2_algorithm: Optional[str]     # Community detection: louvain/leiden
+    stage3_phase2_resolution: Optional[float] # Resolution parameter for label count control
+    stage3_phase2_edge_weights: Optional[Dict[str, float]]  # Edge weight config (α, β, γ)
+    stage3_phase2_must_links: Optional[List[tuple]]  # Must-link constraints
+    stage3_phase2_cannot_links: Optional[List[tuple]]  # Cannot-link constraints
+    stage3_phase2_labels: Optional[Dict[str, Any]]    # LabelV2 format results
+    stage3_phase2_feedback: Optional[Dict[str, Any]]  # User feedback and modifications
+    stage3_phase2_llm_suggestions: Optional[Dict[str, Any]]  # LLM-generated label suggestions
+    
+    # Legacy fields (for backward compatibility)
     stage3_search_iterations: Optional[int]    # Auto-train search iterations
     stage3_manual_inflation: Optional[float]   # Manual mode inflation parameter
     stage3_manual_k: Optional[int]             # Manual mode k neighbors parameter
@@ -170,10 +198,38 @@ def initialize_project_state(
     state["grammar_corrected_text"] = None
     state["sentence_analysis_result"] = None
     
-    # Stage 3 fields - 초기에는 None으로 설정
+    # Stage 3 fields - New Two-Phase Approach
     state["stage3_mode"] = None
     state["stage3_status"] = None
     state["stage3_error"] = None
+    state["stage3_current_phase"] = None
+    
+    # Phase 1: Primary Labeling fields
+    state["stage3_phase1_status"] = None
+    state["stage3_phase1_knn_k"] = None
+    state["stage3_phase1_csls_threshold"] = None
+    state["stage3_phase1_mcl_inflation"] = None
+    state["stage3_phase1_mcl_expansion"] = None
+    state["stage3_phase1_mcl_pruning"] = None
+    state["stage3_phase1_top_m"] = None
+    state["stage3_phase1_groups"] = None
+    state["stage3_phase1_prototypes"] = None
+    state["stage3_phase1_metadata"] = None
+    state["stage3_phase1_quality_stats"] = None
+    
+    # Phase 2: Secondary Labeling fields
+    state["stage3_phase2_status"] = None
+    state["stage3_phase2_mode"] = None
+    state["stage3_phase2_algorithm"] = None
+    state["stage3_phase2_resolution"] = None
+    state["stage3_phase2_edge_weights"] = None
+    state["stage3_phase2_must_links"] = None
+    state["stage3_phase2_cannot_links"] = None
+    state["stage3_phase2_labels"] = None
+    state["stage3_phase2_feedback"] = None
+    state["stage3_phase2_llm_suggestions"] = None
+    
+    # Legacy fields for backward compatibility
     state["stage3_search_iterations"] = None
     state["stage3_manual_inflation"] = None
     state["stage3_manual_k"] = None

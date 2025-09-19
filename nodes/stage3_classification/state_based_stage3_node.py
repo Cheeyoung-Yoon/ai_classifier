@@ -6,7 +6,7 @@ Refactored node that reads embeddings directly from state and uses the clusterin
 import logging
 from typing import Dict, Any
 
-from ...graph.state import GraphState
+from graph.state import GraphState
 from .clustering_service import Stage3ClusteringService
 
 logger = logging.getLogger(__name__)
