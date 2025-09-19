@@ -1,22 +1,22 @@
 """
-Trail 3 - Clean Stage 3 MCL Classification Module
+Stage3 Classification Module with NMI/ARI Evaluation
 
-Core components for production-ready MCL clustering in LangGraph pipelines.
+Production-ready singleton-aware clustering system for LangGraph pipelines.
+Uses NMI/ARI evaluation metrics for robust clustering quality assessment.
 """
 
-from .router import stage3_router
-from .classification import stage3_classify
-from .data_loader import load_data_from_state, map_clusters_back_to_data
-from .mcl_pipeline import estimate_clusters, auto_train_mcl, manual_train_mcl
-from .config import Stage3Config
+from .stage3_node import stage3_classification_node
+from .singleton_aware_stage3_node import singleton_aware_stage3_node
+from .state_based_stage3_node import state_based_stage3_node
+from .clustering_service import Stage3ClusteringService
+from .singleton_aware_clustering_nmi import SingletonAwareClusteringNMI
+from .nmi_ari_evaluation import NMIARIEvaluator
 
 __all__ = [
-    'stage3_router',
-    'stage3_classify', 
-    'load_data_from_state',
-    'map_clusters_back_to_data',
-    'estimate_clusters',
-    'auto_train_mcl', 
-    'manual_train_mcl',
-    'Stage3Config'
+    'stage3_classification_node',
+    'singleton_aware_stage3_node', 
+    'state_based_stage3_node',
+    'Stage3ClusteringService',
+    'SingletonAwareClusteringNMI',
+    'NMIARIEvaluator'
 ]

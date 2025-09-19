@@ -5,9 +5,23 @@ Integrates trail3 MCL clustering with LangGraph state management.
 from typing import Dict, Any
 import logging
 
-from graph.state import GraphState
-from .classification import stage3_classify
-from .router import stage3_router
+# Import guards to prevent failures
+try:
+    from graph.state import GraphState
+except ImportError:
+    from ...graph.state import GraphState
+
+try:
+    from .classification import stage3_classify
+except ImportError:
+    def stage3_classify(state):
+        return {**state, "stage3_status": "failed", "stage3_error": "Classification module not available"}
+
+try:
+    from .router import stage3_router
+except ImportError:
+    def stage3_router(state):
+        return {**state, "stage3_status": "failed", "stage3_error": "Router module not available"}
 
 logger = logging.getLogger(__name__)
 

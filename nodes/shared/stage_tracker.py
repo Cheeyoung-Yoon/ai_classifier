@@ -1,22 +1,21 @@
 # nodes/shared/stage_tracker.py - Stage Tracking and Management Nodes
 from typing import Dict, Any
 from datetime import datetime
-import sys
-import os
+import logging
 
-# Add the project root to sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-from utils.cost_tracker import (
+# Use relative imports instead of sys.path manipulation
+from ...utils.cost_tracker import (
     calculate_total_llm_cost, 
     create_stage_info, 
     print_stage_summary,
     calculate_pipeline_runtime,
     print_pipeline_status
 )
-from utils.stage_history_manager import get_or_create_history_manager
-from utils.project_manager import get_project_manager
-from config.config import settings
+from ...utils.stage_history_manager import get_or_create_history_manager
+from ...utils.project_manager import get_project_manager
+from ...config.config import settings
+
+logger = logging.getLogger(__name__)
 
 def update_stage_tracking(state: Dict[str, Any], stage_name: str) -> Dict[str, Any]:
     """

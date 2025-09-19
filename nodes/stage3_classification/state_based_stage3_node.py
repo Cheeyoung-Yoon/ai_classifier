@@ -1,28 +1,28 @@
 """
-Singleton-Aware Stage3 Classification Node
-Updated to use state-based clustering service instead of CSV/glob logic.
+State-based Stage3 Classification Node
+Refactored node that reads embeddings directly from state and uses the clustering service.
 """
 
 import logging
 from typing import Dict, Any
 
+from ...graph.state import GraphState
 from .clustering_service import Stage3ClusteringService
 
 logger = logging.getLogger(__name__)
 
 
-def singleton_aware_stage3_node(state: Dict[str, Any]) -> Dict[str, Any]:
+def state_based_stage3_node(state: GraphState) -> GraphState:
     """
-    Refactored singleton-aware stage3 classification node.
-    Now delegates to the clustering service instead of using CSV/glob logic.
+    State-based Stage3 classification node that processes embeddings from matched_questions.
     
     Args:
         state: LangGraph state containing matched_questions with embeddings data
         
     Returns:
-        Updated state with stage3_* fields populated
+        Updated GraphState with stage3_* fields populated
     """
-    logger.info("Starting singleton-aware Stage3 classification")
+    logger.info("Starting state-based Stage3 classification")
     
     try:
         # Extract required data from state
@@ -71,19 +71,9 @@ def singleton_aware_stage3_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return updated_state
         
     except Exception as e:
-        logger.error(f"Singleton-aware Stage3 node failed: {str(e)}")
+        logger.error(f"State-based Stage3 node failed: {str(e)}")
         return {
             **state,
             "stage3_status": "failed",
             "stage3_error": f"Node execution failed: {str(e)}"
         }
-
-
-# Backward compatibility - keep old function name as alias
-def load_column_wise_data(directory_path):
-    """
-    Deprecated function kept for backward compatibility.
-    New implementation should use state-based clustering service.
-    """
-    logger.warning("load_column_wise_data is deprecated. Use state-based clustering service instead.")
-    return {}

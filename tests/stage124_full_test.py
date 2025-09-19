@@ -1,6 +1,6 @@
 """
 Full Pipeline Integration Test (Stage 1-2-3).
-Tests the complete LangGraph pipeline with Stage 3 MCL classification.
+Tests the complete LangGraph pipeline with Stage 3 state-based classification.
 """
 import os
 import sys
@@ -8,13 +8,19 @@ import json
 import time
 from pathlib import Path
 
-# Add project root to path
-project_root = "/home/cyyoon/test_area/ai_text_classification/2.langgraph"
-sys.path.insert(0, project_root)
+# Add project root to path using config
+try:
+    from config.config import settings
+    project_root = Path(settings.PROJECT_DATA_BASE_DIR).resolve()
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+except ImportError:
+    # Fallback for when config is not available
+    project_root = "/home/cyyoon/test_area/ai_text_classification/2.langgraph"
+    sys.path.insert(0, project_root)
 
 from graph.graph import create_workflow, run_pipeline
 from graph.state import initialize_project_state
-from nodes.stage3_classification.evaluation import mcl_scoring_function
 
 
 def test_full_pipeline_with_stage3():
@@ -305,11 +311,12 @@ def test_stage3_evaluation_integration():
     
     for scenario_name, pred_labels in test_predictions:
         try:
-            scores = mcl_scoring_function(true_labels, pred_labels)
+            # Simple evaluation without external scoring function
+            from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
             
-            nmi = scores['metrics']['nmi']
-            ari = scores['metrics']['ari']
-            quality = get_clustering_quality((nmi + ari) / 2)
+            nmi = normalized_mutual_info_score(true_labels, pred_labels)
+            ari = adjusted_rand_score(true_labels, pred_labels)
+            quality = "GOOD" if (nmi + ari) / 2 > 0.5 else "FAIR" if (nmi + ari) / 2 > 0.3 else "POOR"
             
             print(f"{scenario_name:<10} {nmi:<6.3f} {ari:<6.3f} {quality:<10}")
             

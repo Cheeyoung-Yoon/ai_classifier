@@ -31,11 +31,20 @@ class Settings:
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "3"))
 
     def __init__(self):
+        # Remove eager API key validation - now handled lazily by nodes that need it
+        pass
+    
+    def get_openai_api_key(self) -> str:
+        """
+        Lazy API key retrieval with validation.
+        Call this method from nodes that actually need OpenAI API access.
+        """
         if not self.OPENAI_API_KEY:
             raise ValueError(
                 "OPENAI_API_KEY not loaded. Put it in .env(.local) at project root or config/, "
                 "or export it in your shell."
             )
+        return self.OPENAI_API_KEY
 
 settings = Settings()
 where_loaded = _loaded_from  # for debugging

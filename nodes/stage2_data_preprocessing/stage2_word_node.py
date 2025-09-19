@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime
 import tqdm
 from typing import Dict, Any, Optional
-from io_layer.embedding import VectorEmbedding
+from services.embedding import get_embedding_provider
 from .prep_sentence import get_column_locations
 from utils.project_manager import get_project_manager
 from config.config import settings
@@ -21,12 +21,13 @@ def stage2_word_node(state: Dict[str, Any], deps: Optional[Any] = None) -> Dict[
     
     Args:
         state: Current graph state
-        deps: Dependencies
+        deps: Dependencies (can include shared embedding provider)
         
     Returns:
         Updated state with WORD processing results and CSV file path
     """
-    embed = VectorEmbedding()
+    # Use shared embedding provider instead of creating new instance
+    embedding_provider = get_embedding_provider()
     
     current_question_id = state.get('current_question_id')
     current_question_type = state.get('current_question_type')
@@ -62,7 +63,7 @@ def stage2_word_node(state: Dict[str, Any], deps: Optional[Any] = None) -> Dict[
                 col_value = text_df.iloc[i, col_idx]
                 if pd.notna(col_value):
                     row_data[f'text_{col_idx+1}'] = str(col_value).strip()
-                    row_data[f'embed_text_{col_idx+1}'] = embed.embed(str(col_value).strip()) if str(col_value).strip() else []
+                    row_data[f'embed_text_{col_idx+1}'] = embedding_provider.encode(str(col_value).strip()) if str(col_value).strip() else []
                     
                 else:
                     row_data[f'text_{col_idx+1}'] = ""

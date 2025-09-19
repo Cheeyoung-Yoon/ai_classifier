@@ -2,10 +2,15 @@
 from typing import Dict, Any
 import sys
 import os
+from pathlib import Path
 
-# Add project root to path
-project_root = "/home/cyyoon/test_area/ai_text_classification/2.langgraph"
-sys.path.insert(0, project_root)
+# Import settings to get project root path
+from config.config import settings
+
+# Add project root to path using settings
+project_root = Path(settings.PROJECT_DATA_BASE_DIR).resolve()
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from langgraph.graph import StateGraph, START, END
 import json

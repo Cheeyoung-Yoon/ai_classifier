@@ -1,6 +1,7 @@
 # graph/state.py - Memory Optimized State
 from typing import TypedDict, List, Dict, Any, Optional
 import os
+from pathlib import Path
 
 class GraphState(TypedDict):
     """Memory optimized LangGraph state for text classification workflow"""
@@ -77,13 +78,19 @@ class GraphState(TypedDict):
     processing_time_seconds: Optional[float]   # Processing time for stage3
 
 # Utility functions for state management
-def get_project_file_path(project_name: str, filename: str, base_dir: str = "/home/cyyoon/test_area/ai_text_classification/2.langgraph", subdir: str = "") -> str:
+def get_project_file_path(project_name: str, filename: str, base_dir: str = None, subdir: str = "") -> str:
     """Generate project-based file path"""
+    if base_dir is None:
+        from config.config import settings
+        base_dir = Path(settings.PROJECT_DATA_BASE_DIR)
+    else:
+        base_dir = Path(base_dir)
+    
     if subdir:
-        return os.path.join(base_dir, "data", project_name, subdir, filename)
-    return os.path.join(base_dir, "data", project_name, filename)
+        return str(base_dir / "data" / project_name / subdir / filename)
+    return str(base_dir / "data" / project_name / filename)
 
-def get_raw_file_path(project_name: str, filename: str, base_dir: str = "/home/cyyoon/test_area/ai_text_classification/2.langgraph") -> str:
+def get_raw_file_path(project_name: str, filename: str, base_dir: str = None) -> str:
     """Generate raw data file path"""
     return get_project_file_path(project_name, filename, base_dir, "raw")
 
@@ -91,7 +98,7 @@ def initialize_project_state(
     project_name: str,
     survey_filename: str,
     data_filename: str,
-    base_dir: str = "/home/cyyoon/test_area/ai_text_classification/2.langgraph",
+    base_dir: str = None,
     use_raw_dir: bool = True
 ) -> GraphState:
     """

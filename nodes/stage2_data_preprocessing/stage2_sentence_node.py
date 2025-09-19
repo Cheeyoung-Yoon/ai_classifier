@@ -6,13 +6,17 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+
 from io_layer.llm.client import LLMClient
-from io_layer.embedding import VectorEmbedding
+from services.embedding import get_embedding_provider
 from .prep_sentence import get_column_locations, extract_question_choices
 from utils.project_manager import get_project_manager
 from config.config import settings
 from config.prompt.prompt_loader import load_prompt_config, resolve_branch
 from utils.pydantic_utils import extract_llm_response_data
+
+logger = logging.getLogger(__name__)
 
 
 def stage2_sentence_node(state: Dict[str, Any], deps: Optional[Any] = None) -> Dict[str, Any]:
@@ -24,7 +28,7 @@ def stage2_sentence_node(state: Dict[str, Any], deps: Optional[Any] = None) -> D
     
     Args:
         state: Current graph state
-        deps: Dependencies (contains llm_client)
+        deps: Dependencies (contains llm_client and shared embedding provider)
         
     Returns:
         Updated state with sentence processing results and CSV file path
@@ -32,10 +36,10 @@ def stage2_sentence_node(state: Dict[str, Any], deps: Optional[Any] = None) -> D
     current_question_id = state.get('current_question_id')
     current_question_type = state.get('current_question_type')
     
-    print(f"stage2_sentence_node: Processing SENTENCE type question {current_question_id} ({current_question_type})")
+    logger.info(f"Processing SENTENCE type question {current_question_id} ({current_question_type})")
     
-    # VectorEmbedding 인스턴스 생성
-    embed = VectorEmbedding()
+    # Use shared embedding provider instead of creating new instance
+    embedding_provider = get_embedding_provider()
     
     try:
         # Config에서 prompt 로드
@@ -325,14 +329,14 @@ def stage2_sentence_node(state: Dict[str, Any], deps: Optional[Any] = None) -> D
                     'matching_question': payload.get('matching_question', False),
                     'org_text': original_text,
                     'correction_text': corrected_text,
-                    'org_text_embed': embed.embed(original_text) if original_text.strip() else [],
-                    'correction_text_embed': embed.embed(corrected_text) if corrected_text.strip() else [],
+                    'org_text_embed': embedding_provider.encode(original_text) if original_text.strip() else [],
+                    'correction_text_embed': embedding_provider.encode(corrected_text) if corrected_text.strip() else [],
                     'sentence_1': automic_sentence[0] if len(automic_sentence) > 0 else None,
                     'sentence_2': automic_sentence[1] if len(automic_sentence) > 1 else None,
                     'sentence_3': automic_sentence[2] if len(automic_sentence) > 2 else None,
-                    'sentence_1_embed': embed.embed(automic_sentence[0]) if len(automic_sentence) > 0 and automic_sentence[0] and str(automic_sentence[0]).strip() else [],
-                    'sentence_2_embed': embed.embed(automic_sentence[1]) if len(automic_sentence) > 1 and automic_sentence[1] and str(automic_sentence[1]).strip() else [],
-                    'sentence_3_embed': embed.embed(automic_sentence[2]) if len(automic_sentence) > 2 and automic_sentence[2] and str(automic_sentence[2]).strip() else [],
+                    'sentence_1_embed': embedding_provider.encode(automic_sentence[0]) if len(automic_sentence) > 0 and automic_sentence[0] and str(automic_sentence[0]).strip() else [],
+                    'sentence_2_embed': embedding_provider.encode(automic_sentence[1]) if len(automic_sentence) > 1 and automic_sentence[1] and str(automic_sentence[1]).strip() else [],
+                    'sentence_3_embed': embedding_provider.encode(automic_sentence[2]) if len(automic_sentence) > 2 and automic_sentence[2] and str(automic_sentence[2]).strip() else [],
                     'S_1': ', '.join(svc_keywords.get('sentence1', {}).get('S', [])),
                     'V_1': ', '.join(svc_keywords.get('sentence1', {}).get('V', [])),
                     'C_1': ', '.join(svc_keywords.get('sentence1', {}).get('C', [])),

@@ -1,7 +1,66 @@
 """
 Stage 3 Classification Test for LangGraph Pipeline.
-Tests the integrated trail3 MCL clustering with evaluation capabilities.
+Tests the integrated state-based clustering with evaluation capabilities.
 """
+import os
+import sys
+import json
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# Add project root to path using config
+try:
+    from config.config import settings
+    project_root = Path(settings.PROJECT_DATA_BASE_DIR).resolve()
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+except ImportError:
+    # Fallback for when config is not available
+    project_root = "/home/cyyoon/test_area/ai_text_classification/2.langgraph"
+    sys.path.insert(0, project_root)
+
+from graph.state import GraphState, initialize_project_state
+from nodes.stage3_classification.state_based_stage3_node import state_based_stage3_node
+from nodes.stage3_classification.clustering_service import Stage3ClusteringService
+
+
+def test_stage3_node_integration():
+    """Test State-based Stage 3 node with mock matched_questions data."""
+    print("🧪 Testing State-based Stage 3 Classification Node")
+    print("=" * 60)
+    
+    # Create mock matched_questions data with embeddings
+    print("📊 Creating mock matched_questions data with embeddings...")
+    
+    matched_questions = {
+        "문4": {
+            "question_info": {
+                "id": "문4",
+                "type": "img",
+                "text": "Test question 4"
+            },
+            "stage2_data": {
+                "embeddings": np.random.rand(50, 384).tolist(),  # Mock embeddings
+                "texts": [f"Test text {i}" for i in range(50)],
+                "labels": [f"label_{i % 5}" for i in range(50)],  # 5 different labels
+                "status": "completed"
+            }
+        },
+        "문5": {
+            "question_info": {
+                "id": "문5", 
+                "type": "img",
+                "text": "Test question 5"
+            },
+            "stage2_data": {
+                "embeddings": np.random.rand(30, 384).tolist(),  # Mock embeddings
+                "texts": [f"Test text {i}" for i in range(30)],
+                "labels": [f"label_{i % 3}" for i in range(30)],  # 3 different labels
+                "status": "completed"
+            }
+        }
+    }
 import os
 import sys
 import json
