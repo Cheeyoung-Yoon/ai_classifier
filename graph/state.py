@@ -56,6 +56,25 @@ class GraphState(TypedDict):
     stage2_csv_output_path: Optional[str]      # Path to Stage 2 CSV output file
     grammar_corrected_text: Optional[str]      # Grammar-corrected version for SENTENCE type
     sentence_analysis_result: Optional[Dict[str, Any]]  # Sentence analysis result
+    
+    # Stage 3 classification fields
+    stage3_mode: Optional[str]                 # MCL mode: estimate/auto_train/manual_train
+    stage3_status: Optional[str]               # Status: completed/failed/skipped
+    stage3_error: Optional[str]                # Error message if failed
+    stage3_search_iterations: Optional[int]    # Auto-train search iterations
+    stage3_manual_inflation: Optional[float]   # Manual mode inflation parameter
+    stage3_manual_k: Optional[int]             # Manual mode k neighbors parameter
+    stage3_manual_max_iters: Optional[int]     # Manual mode max iterations
+    stage3_best_parameters: Optional[Dict[str, Any]]     # Auto-train best parameters
+    stage3_best_score: Optional[float]         # Auto-train best score
+    stage3_best_evaluation: Optional[Dict[str, Any]]     # Evaluation metrics (NMI/ARI)
+    stage3_cluster_labels: Optional[List[int]] # Cluster labels for each embedding
+    stage3_cluster_mapping: Optional[Dict[str, Any]]     # Detailed cluster mapping
+    stage3_cluster_summary: Optional[Dict[str, Any]]     # Cluster summary statistics
+    stage3_estimated_clusters: Optional[int]   # Estimate mode result
+    stage3_recommended_k: Optional[int]        # Estimate mode recommended k
+    stage3_data_summary: Optional[Dict[str, Any]]        # Data processing summary
+    processing_time_seconds: Optional[float]   # Processing time for stage3
 
 # Utility functions for state management
 def get_project_file_path(project_name: str, filename: str, base_dir: str = "/home/cyyoon/test_area/ai_text_classification/2.langgraph", subdir: str = "") -> str:
@@ -143,5 +162,24 @@ def initialize_project_state(
     state["stage2_csv_output_path"] = None
     state["grammar_corrected_text"] = None
     state["sentence_analysis_result"] = None
+    
+    # Stage 3 fields - 초기에는 None으로 설정
+    state["stage3_mode"] = None
+    state["stage3_status"] = None
+    state["stage3_error"] = None
+    state["stage3_search_iterations"] = None
+    state["stage3_manual_inflation"] = None
+    state["stage3_manual_k"] = None
+    state["stage3_manual_max_iters"] = None
+    state["stage3_best_parameters"] = None
+    state["stage3_best_score"] = None
+    state["stage3_best_evaluation"] = None
+    state["stage3_cluster_labels"] = None
+    state["stage3_cluster_mapping"] = None
+    state["stage3_cluster_summary"] = None
+    state["stage3_estimated_clusters"] = None
+    state["stage3_recommended_k"] = None
+    state["stage3_data_summary"] = None
+    state["processing_time_seconds"] = None
     
     return state

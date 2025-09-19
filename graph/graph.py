@@ -36,6 +36,9 @@ from nodes.stage2_data_preprocessing.stage2_sentence_node import stage2_sentence
 from nodes.stage2_data_preprocessing.stage2_etc_node import stage2_etc_node
 from nodes.stage2_next_question import stage2_next_question_node, stage2_completion_router
 
+# Import Stage 3 classification node
+from nodes.stage3_classification.stage3_node import stage3_classification_node
+
 # Import stage tracking nodes
 from nodes.shared.stage_tracker import (
     stage1_data_preparation_completion,
@@ -108,6 +111,9 @@ def create_workflow() -> StateGraph:
     workflow.add_node("stage2_etc_node", stage2_etc_node)
     workflow.add_node("stage2_next_question", stage2_next_question_node)
     
+    # Add Stage 3 node (MCL classification)
+    workflow.add_node("stage3_classification", stage3_classification_node)
+    
     # Add stage tracking nodes
     workflow.add_node("stage1_completion", stage1_data_preparation_completion)
     workflow.add_node("stage1_flush_completion", stage1_memory_flush_completion)
@@ -156,9 +162,12 @@ def create_workflow() -> StateGraph:
         stage2_completion_router,
         {
             "CONTINUE": "stage2_main",  # Loop back to main for next question
-            "__END__": END
+            "COMPLETE": "stage3_classification"  # Move to Stage 3 when all questions done
         }
     )
+    
+    # Stage 3 to end
+    workflow.add_edge("stage3_classification", END)
     
     return workflow
 

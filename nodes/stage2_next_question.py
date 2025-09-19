@@ -55,13 +55,13 @@ def stage2_completion_router(state: Dict[str, Any]) -> str:
     Stage 2 완료 여부에 따른 라우팅
     
     Returns:
-        "CONTINUE" or "__END__"
+        "CONTINUE" or "COMPLETE"
     """
     is_complete = state.get('stage2_processing_complete', False)
     
     if is_complete:
-        print("Stage2 Router: All questions processed -> __END__")
-        return "__END__"
+        print("Stage2 Router: All questions processed -> COMPLETE (going to Stage 3)")
+        return "COMPLETE"
     else:
         print("Stage2 Router: More questions to process -> CONTINUE")
         return "CONTINUE"
